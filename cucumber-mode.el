@@ -87,6 +87,45 @@
   (set (make-local-variable 'font-lock-keywords) feature-font-lock-keywords))
 
 ;;
+;; Indentation
+;;
+(defun cucumber-indent-line ()
+  "Indent current line as cucumber feature."
+  (interactive)
+  (beginning-of-line)
+  (if (bobp)
+      (indent-line-to 0)
+    (let ((not-indented t) cur-indent)
+      (if (looking-at "^[ \t]*Feature:")
+          (progn
+            (save-excursion
+              (forward-line -1)
+              (setq not-indented nil)
+              (setq cur-indent 0))))
+      (if (looking-at "^[ \t]*Scenario:")
+          (progn
+            (save-excursion
+              (forward-line -1)
+              (setq not-indented nil)
+              (setq cur-indent 2))))
+      (save-excursion
+        (while not-indented
+          (forward-line -1)
+          (if (looking-at "^[ \t]*Scenario:")
+              (progn
+                (setq not-indented nil)
+                (setq cur-indent 4)))
+          (if (looking-at "^[ \t]*Feature:")
+              (progn
+                (setq not-indented nil)
+                (setq cur-indent 2)))
+          (if (bobp)
+              (setq not-indented nil))))
+      (if cur-indent
+          (indent-line-to cur-indent)
+        (indent-line-to 0)))))
+
+;;
 ;; Mode function
 ;;
 
@@ -99,6 +138,7 @@
   (setq mode-name "Feature")
   (setq major-mode 'feature-mode)
   (feature-mode-variables)
+  (set (make-local-variable 'indent-line-function) 'cucumber-indent-line)
   (run-mode-hooks 'feature-mode-hook))
 
 (add-to-list 'auto-mode-alist '("\\.feature\\'" . feature-mode))
