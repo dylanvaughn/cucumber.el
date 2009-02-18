@@ -107,18 +107,18 @@
             (save-excursion
               (forward-line -1)
               (setq not-indented nil)
-              (setq cur-indent 2))))
+              (setq cur-indent feature-indent-level))))
       (save-excursion
         (while not-indented
           (forward-line -1)
           (if (looking-at "^[ \t]*Scenario:")
               (progn
                 (setq not-indented nil)
-                (setq cur-indent 4)))
+                (setq cur-indent (* 2 feature-indent-level))))
           (if (looking-at "^[ \t]*Feature:")
               (progn
                 (setq not-indented nil)
-                (setq cur-indent 2)))
+                (setq cur-indent feature-indent-level)))
           (if (bobp)
               (setq not-indented nil))))
       (if cur-indent
