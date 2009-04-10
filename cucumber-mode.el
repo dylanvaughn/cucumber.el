@@ -34,11 +34,13 @@
 (defconst feature-font-lock-keywords
   (list
    '("^ *Feature:" (0 font-lock-keyword-face) (".*" nil nil (0 font-lock-type-face t)))
+   '("^ *Background:$" (0 font-lock-keyword-face))
    '("^ *Scenario\\(?: Outline\\)?:" (0 font-lock-keyword-face) (".*" nil nil (0 font-lock-function-name-face t)))
    '("^ *Given" . font-lock-keyword-face)
    '("^ *When" . font-lock-keyword-face)
    '("^ *Then" . font-lock-keyword-face)
    '("^ *And" . font-lock-keyword-face)
+   '("^ *@.*" . font-lock-preprocessor-face)
    '("^ *\\(?:More \\)?Examples:" . font-lock-keyword-face)
    '("^ *#.*" 0 font-lock-comment-face t)
    ))
@@ -53,7 +55,8 @@
 (if feature-mode-map
     nil
   (setq feature-mode-map (make-sparse-keymap))
-  (define-key feature-mode-map "\C-m" 'newline))
+  (define-key feature-mode-map "\C-m" 'newline)
+  (define-key feature-mode-map "\M-q" 'feature-align-table))
 
 ;;
 ;; Syntax table
@@ -143,6 +146,137 @@
 
 (add-to-list 'auto-mode-alist '("\\.feature\\'" . feature-mode))
 
-; snippets
-(if (functionp 'yas/load-directory)
-      (yas/load-directory (concat (file-name-directory load-file-name) "snippets")))
+;;
+;; Snippets
+;;
+
+(defvar feature-snippet-directory (concat (file-name-directory load-file-name) "snippets")
+  "Path to the feature-mode snippets.
+
+If the yasnippet library is loaded, snippets in this directory
+are loaded on startup.  If nil, don't load snippets.")
+
+(when (and (featurep 'yasnippet)
+           feature-snippet-directory
+           (file-exists-p feature-snippet-directory))
+  (yas/load-directory feature-snippet-directory))
+
+;;
+;; Tables
+;;
+
+(defun feature-align-table ()
+  "Realign the table at point, if any."
+  (interactive)
+  (if (feature-in-table-p)
+    (save-excursion
+      (save-restriction
+        (narrow-to-region (feature-beginning-of-table) (feature-end-of-table))
+        (feature-indent-table)
+        (feature-append-missing-table-bars)
+        (feature-pad-table-cells)))))
+
+(defvar feature-table-line-regexp "^[ \t]*|")
+
+(defun feature-in-table-p ()
+  (save-excursion
+    (beginning-of-line)
+    (looking-at feature-table-line-regexp)))
+
+(defun feature-beginning-of-table ()
+  (save-excursion
+    (beginning-of-line)
+    (while (and (looking-at feature-table-line-regexp)
+                (not (bobp)))
+      (forward-line -1))
+    (unless (looking-at feature-table-line-regexp)
+      (forward-line))
+    (point)))
+
+(defun feature-end-of-table ()
+  (save-excursion
+    (beginning-of-line)
+    (while (looking-at feature-table-line-regexp)
+      (or (zerop (forward-line 1))
+          (goto-char (point-max))))
+    (point)))
+
+(defun feature-each-table-line (line-callback)
+  (goto-char (point-min))
+  (let ((line-start (make-marker))
+        (line-end (make-marker)))
+    (while (not (eobp))
+      (save-excursion
+        (set-marker line-start (point-at-bol))
+        (set-marker line-end (point-at-eol))
+        (funcall line-callback line-start line-end))
+      (forward-line))
+    (set-marker line-start nil)
+    (set-marker line-end nil)))
+
+(defun feature-each-table-cell (cell-callback)
+  (goto-char (point-min))
+  (let (cell-column
+        (cell-start (make-marker))
+        (cell-end (make-marker)))
+    (feature-each-table-line
+     (lambda (bol eol)
+       (goto-char bol)
+       (setq cell-column 0)
+       (set-marker cell-start (search-forward "|" eol))
+       (while (search-forward "|" eol t)
+         (set-marker cell-end (1- (point)))
+         (save-excursion
+           (funcall cell-callback cell-column cell-start cell-end))
+         (set-marker cell-start (point))
+         (setq cell-column (1+ cell-column)))))
+    (set-marker cell-start nil)
+    (set-marker cell-end nil)))
+
+(defun feature-indent-table ()
+  (let ((indent (save-excursion
+                  (goto-char (point-min))
+                  (skip-syntax-forward "-"))))
+    (feature-each-table-line
+     (lambda (s e)
+       (goto-char s)
+       (delete-horizontal-space)
+       (insert (make-string indent ?\ ))))))
+
+(defun feature-append-missing-table-bars ()
+  (feature-each-table-line
+   (lambda (s e)
+     (goto-char e)
+     (delete-horizontal-space)
+     (if (/= (char-before) ?\|)
+         (insert "|")))))
+
+(defun feature-compute-table-column-widths ()
+  (let ((widths (make-hash-table))
+        width)
+    (feature-each-table-cell
+     (lambda (column s e)
+       (goto-char s)
+       (setq s (+ s (skip-syntax-forward "-")))
+       (goto-char e)
+       (setq e (+ e (skip-syntax-backward "-")))
+       (let ((width (max 0 (- e s))))
+         (puthash column
+                  (max width (gethash column widths 0))
+                  widths))))
+    widths))
+
+(defun feature-pad-table-cells ()
+  (let ((widths (feature-compute-table-column-widths))
+        width)
+    (feature-each-table-cell
+     (lambda (column s e)
+       (setq width (gethash column widths 0))
+       (unless (and (= (- e s) (+ width 2))
+                    (string-match "\\` \\S-.* \\'" (buffer-substring s e)))
+         (goto-char s)
+         (delete-horizontal-space)
+         (insert " ")
+         (goto-char e)
+         (delete-horizontal-space)
+         (insert-before-markers (make-string (- (+ s width 2) (point)) ?\ )))))))
